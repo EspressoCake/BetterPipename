@@ -1,0 +1,207 @@
+import java.util.Random;
+
+global('%pipemap')
+%pipemap['chrome_sync'] = 'chrome.sync';
+%pipemap['chrome_mojo'] = 'mojo';
+%pipemap['crashpad'] = 'crashpad_';
+%pipemap['dotnet'] = 'dotnet-diagnostic-';
+%pipemap['powershell'] = 'PSHOST.' . ticks();
+%pipemap['powershell_ise'] = 'PSHOST' . ticks();
+%pipemap['windows_socket'] = 'Winsock2\\CatalogChangeListener-';
+
+popup beacon_bottom {
+    item "Generate SMB Pipe Listener" {
+        local('%hashmap $dialog');
+        foreach $key (keys(%pipemap))
+        {
+            %hashmap[$key] = '';
+        }
+
+        $dialog = dialog("SMB Pipe Generator", %(pipe => 'chrome_mojo', bid => $1, pipename => ''), &orchestrate);
+        drow_combobox($dialog, "pipe", "Pipe Type", sorta(keys(%pipemap)));
+        dbutton_action($dialog, "Generate");
+        dialog_show($dialog);
+    }
+}
+
+sub orchestrate {
+    local('$bid $friendlyBID $pipe $hostName $processID $finalPipeName $dialog');
+    $bid = $3['bid'];
+    $pipe = $3['pipe'];
+    $friendlyBID = replace($bid, '\[', '');
+    $friendlyBID = replace($friendlyBID, '\]', '');
+    $hostName = binfo($friendlyBID, 'computer');
+    $processID = binfo($friendlyBID, 'pid');
+
+    if ($pipe ismatch 'chrome_mojo')
+    {
+        $finalPipeName = mojoListenerNamePipe($bid);
+    } else if ($pipe ismatch 'chrome_sync') 
+    {
+        $finalPipeName = chromesyncListenerNamePipe($bid);
+    } else if ($pipe ismatch 'crashpad') 
+    {
+        $finalPipeName = crashpadListenerNamePipe($bid);
+    } else if ($pipe ismatch 'dotnet') 
+    {
+        $finalPipeName = dotnetListenerPipeName($bid);
+    }
+    else if ($pipe ismatch 'powershell')
+    {
+        $finalPipeName = powershellListenerPipe($bid);
+    }
+    else if ($pipe ismatch 'powershell_ise')
+    {
+        $finalPipeName = powershellISEListenerPipe($bid);
+    }
+    else
+    {
+        $finalPipeName = winsockListenerNamePipe($bid);
+    }
+
+    listener_create_ext($hostName . "_" . $processID . "_" . $pipe, "windows/beacon_bind_pipe", %(port => $finalPipeName));
+}
+
+sub threadIDGenerator {
+    $f = [new Random];
+    return [$f nextInt: 1000] + 1000;
+}
+
+sub randomIntegerGenerator {
+    $f = [new Random];
+    return [$f nextInt: 9];
+}
+
+sub randomUppercaseCharacter {
+    local('$asciiUpper');
+    $asciiUpper = @(
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 
+        'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 
+        'Y', 'Z');
+    $random = [new Random];
+    $randomIndex = [$random nextInt: size($asciiUpper) - 1];
+
+    return $asciiUpper[$randomIndex];
+}
+
+sub mojoListenerNamePipe {
+    local('$pipeName $pid');
+    $pid = replace($1, '\[', '');
+    $pid = replace($pid, '\]', '');
+    $pid = binfo($pid, 'pid');
+
+    $pipeName =  "";
+    $pipeName .= %pipemap['chrome_mojo'];
+    $pipeName .= "." . $pid . ".";
+    $pipeName .= threadIDGenerator();
+
+    local('$index');
+    for ($index = 0; $index < 20; $index++)
+    {
+        $pipeName .= randomIntegerGenerator();
+    }
+
+    return $pipeName;
+}
+
+sub crashpadListenerNamePipe {
+    local('$pipeName $pid');
+    $pid = replace($1, '\[', '');
+    $pid = replace($pid, '\]', '');
+    $pid = binfo($pid, 'pid');
+
+    $pipeName = "";
+    $pipeName .= %pipemap['crashpad'];
+    $pipeName .= $pid;
+    $pipeName .= "_";
+    
+    local('$index');
+    for ($index = 0; $index < 8; $index++)
+    {
+        $pipeName .= randomUppercaseCharacter();
+    }
+
+    return $pipeName;
+}
+
+sub winsockListenerNamePipe {
+    local('$pipeName');
+    $pipeName =  "";
+    $pipeName .= %pipemap['windows_socket'];
+    
+    local('$f $g');
+    $f = [new Random];
+    $g = [$f nextInt: 255];
+
+    $pipeName .= [Integer toHexString: $g];
+    $pipeName .= randomIntegerGenerator();
+    $pipeName .= "-0";
+
+    return $pipeName;
+}
+
+sub chromesyncListenerNamePipe {
+    local('$pipeName $pid');
+    $pid = replace($1, '\[', '');
+    $pid = replace($pid, '\]', '');
+    $pid = binfo($pid, 'pid');
+
+    $pipeName =  "";
+    $pipeName .= %pipemap['chrome_sync'];
+    $pipeName .= "." . $pid . ".";
+
+    local('$index');
+    for ($index = 0; $index < 8; $index++)
+    {
+        $pipeName .= randomIntegerGenerator();
+    }
+
+    return $pipeName;
+}
+
+sub dotnetListenerPipeName {
+    local('$pipeName $pid');
+    $pid = replace($1, '\[', '');
+    $pid = replace($pid, '\]', '');
+    $pid = binfo($pid, 'pid');
+
+    $pipeName = %pipemap['dotnet'] . $pid;
+
+    return $pipeName;
+}
+
+sub powershellListenerPipe {
+    local('$pipeName $pid');
+    $pid = replace($1, '\[', '');
+    $pid = replace($pid, '\]', '');
+    $pid = binfo($pid, 'pid');
+
+    $pipeName =  "";
+    $pipeName .= %pipemap['powershell'];
+    $pipeName .= ".";
+    $pipeName .= $pid;
+    $pipeName .= ".";
+    $pipeName .= "DefaultAppDomain";
+    $pipeName .= ".";
+    $pipeName .= "powershell";
+
+    return $pipeName;
+}
+
+sub powershellISEListenerPipe {
+    local('$pipeName $pid');
+    $pid = replace($1, '\[', '');
+    $pid = replace($pid, '\]', '');
+    $pid = binfo($pid, 'pid');
+
+    $pipeName =  "";
+    $pipeName .= %pipemap['powershell'];
+    $pipeName .= ".";
+    $pipeName .= $pid;
+    $pipeName .= ".";
+    $pipeName .= "DefaultAppDomain";
+    $pipeName .= ".";
+    $pipeName .= "powershell_ise";
+
+    return $pipeName;
+}
